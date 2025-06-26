@@ -1,3 +1,4 @@
+(Kept from original KolibriOS)
 Most programs in the repository are regularly and automatically compiled
 by the autobuild server, compiled binaries are available at
 http://builds.kolibrios.org. The autobuild server uses the build system Tup,
