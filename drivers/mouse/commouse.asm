@@ -1,12 +1,13 @@
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;                                                              ;;
-;; Copyright (C) KolibriOS team 2004-2015. All rights reserved. ;;
-;; Distributed under terms of the GNU General Public License    ;;
-;;                                                              ;;
-;; Includes source code by Kulakov Vladimir Gennadievich.       ;;
-;; Modified by Mario79 and Rus.                                 ;;
-;; 02.12.2009 <Lrz>                                             ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                                                                 ;;
+;; Copyright (C) KolibriOS team 2004-2015. All rights reserved.    ;;
+;; Copyright (C) Charlot Softwares team 2025. All rights reserved. ;;
+;; Distributed under terms of the GNU General Public License       ;;
+;;                                                                 ;;
+;; Includes source code by Kulakov Vladimir Gennadievich.          ;;
+;; Modified by Mario79, Radiump123 and Rus.                        ;;
+;; 02.12.2009 <Lrz>                                                ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 format PE DLL native
 entry START
@@ -17,6 +18,14 @@ entry START
 
         __DEBUG__               = 1
         __DEBUG_LEVEL__         = 2
+
+section '.data' data readable writeable
+
+; List of COM ports to try (only port address needed here)
+ports_list   dd 0x3F8, 0x2F8, 0x3E8, 0x2E8, 0x3E0, 0x2E0
+
+; List of IRQs to try for each port
+irqs_list    dd 3, 4, 5, 7
 
 section '.flat' readable writable executable
 
@@ -56,15 +65,50 @@ proc START c, reason:dword, cmdline:dword
 
         DEBUGF  2,"Loading serial mouse driver\n"
 
-        stdcall init_mouse, 0x3f8, 4
-        stdcall init_mouse, 0x2f8, 3
-        stdcall init_mouse, 0x3e8, 4
-        stdcall init_mouse, 0x2e8, 3
+        mov     esi, ports_list       ; pointer to ports list
+        mov     ecx, (sizeof ports_list) / 4  ; number of ports
 
+.port_loop:
+        mov     eax, [esi]            ; current port
+
+        mov     edi, irqs_list        ; pointer to IRQs list
+        mov     edx, (sizeof irqs_list) / 4    ; number of IRQs
+
+.try_irqs:
+        mov     ebx, [edi]            ; current IRQ
+
+        push    ebx                  ; irq
+        push    eax                  ; port
+        call    init_mouse
+        add     esp, 8               ; clean stack
+
+        test    eax, eax
+        jz      .found_irq           ; if success (eax == 0)
+
+        add     edi, 4
+        dec     edx
+        jnz     .try_irqs
+
+        ; No IRQ worked for this port
+        DEBUGF  1, "No mouse detected on port 0x%x\n", eax
+
+        add     esi, 4
+        dec     ecx
+        jnz     .port_loop
+        jmp     .done
+
+.found_irq:
+        DEBUGF  1, "Mouse detected on port 0x%x IRQ %d\n", eax, ebx
+
+        add     esi, 4
+        dec     ecx
+        jnz     .port_loop
+
+.done:
         invoke  RegService, my_service, service_proc
         ret
 
-  .fail:
+.fail:
         xor     eax, eax
         ret
 
@@ -93,7 +137,7 @@ endp
 
 proc init_mouse stdcall port, irq
 
-        DEBUGF  1, "Trying to init serial mouse on port 0x%x\n", [port]
+        DEBUGF  1, "Trying to init serial mouse on port 0x%x irq %d\n", [port], [irq]
 
         xor     ebx, ebx        ; reserve port area
         mov     ecx, [port]
@@ -219,7 +263,7 @@ proc init_mouse stdcall port, irq
         inc     ebx             ; free port area
         mov     ecx, [port]
         lea     edx, [ecx + 7]
-        push    ebp
+        push     ebp
         invoke  ReservePortArea
         pop     ebp
 
@@ -241,14 +285,14 @@ irq_handler:
         mov     dx, [esi + com_mouse_data.port]
         add     dx, 5
         in      al, dx
-        test    al, 1           ; data ready?
+        test     al, 1           ; data ready?
         jz      .end
 ; read data
         sub     dx, 5
         in      al, dx
         and     al, 01111111b   ; clear MSB (use 7 bit words)
-        test    al, 01000000b   ; First byte indicator set?
-        jnz     .FirstByte
+        test     al, 01000000b   ; First byte indicator set?
+        jnz      .FirstByte
 
 ; Check which data byte we are reading
         cmp     [esi + com_mouse_data.offset], 1
@@ -314,7 +358,7 @@ irq_handler:
         inc     [esi + com_mouse_data.offset]
 
         and     [BTN_DOWN], not 100b
-        test    al, 00100000b
+        test     al, 00100000b
         jz      @f
         or      byte[BTN_DOWN], 100b
   @@:
